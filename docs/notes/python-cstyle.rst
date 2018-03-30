@@ -1,6 +1,10 @@
 Python Design Pattern in C
 ==========================
 
+.. contents:: Table of Contents
+    :backlinks: none
+
+
 Decorator in C
 --------------
 
@@ -429,6 +433,212 @@ C
        return ret;
     }
 
+
+Simple ``try: exp except: exp finally:`` in C
+----------------------------------------------
+
+Python
+
+.. code-block:: python
+
+    >>> try:
+    ...     # do something...
+    ...     raise OSError
+    ... except OSError as e:
+    ...     print('get error OSError')
+    ... finally:
+    ...     print('finally block')
+    ...
+    get error OSError
+    finally block
+
+C
+
+.. code-block:: c
+
+    #include <stdio.h>
+    #include <string.h>
+    #include <setjmp.h>
+
+    enum {
+        ERR_EPERM = 1,
+        ERR_ENOENT,
+        ERR_ESRCH,
+        ERR_EINTR,
+        ERR_EIO
+    };
+
+    #define try    do { jmp_buf jmp_env__;             \
+                        switch ( setjmp(jmp_env__) ) { \
+                            case 0: while(1) {
+    #define except(exc)  	break;                 \
+                            case exc:
+    #define finally         break; }                   \
+                        default:
+    #define end  } } while(0)
+
+    #define raise(exc) longjmp(jmp_env__, exc)
+
+    int main(int argc, char *argv[])
+    {
+        int ret = 0;
+
+        try {
+            raise(ERR_ENOENT);
+        } except(ERR_EPERM) {
+            printf("get exception: %s\n", strerror(ERR_EPERM));
+            ret = -1;
+        } except(ERR_ENOENT) {
+            printf("get exception: %s\n", strerror(ERR_ENOENT));
+            ret = -1;
+        } except(ERR_ESRCH) {
+            printf("get exception: %s\n", strerror(ERR_ENOENT));
+            ret = -1;
+        } finally {
+            printf("finally block\n");
+        } end;
+        return ret;
+    }
+
+
+Simple coroutine in C
+----------------------
+
+Python
+
+.. code-block:: python
+
+    from collections import deque
+
+    _registry = { }
+    _msg_queue = deque()
+
+    def send(name, msg):
+        _msg_queue.append((name, msg))
+
+    def actor(func):
+        def wrapper(*args, **kwargs):
+            gen = func(*args, **kwargs)
+            next(gen)
+            _registry[func.__name__] = gen
+        return wrapper
+
+    @actor
+    def ping():
+        """ coroutine ping """
+        n = yield
+        print('ping %d' % n)
+        send('pong', 20001)
+
+        n = yield
+        print('ping %d' % n)
+        send('pong', 20002)
+
+    @actor
+    def pong():
+        """ coroutine pong """
+        n = yield
+        print('pong %d' % n)
+        send('ping', 10001)
+
+        n = yield
+        print('pong %d' % n)
+        send('ping', 10002)
+
+    def run():
+        while _msg_queue:
+            try:
+                name, msg = _msg_queue.popleft()
+                _registry[name].send(msg)
+            except StopIteration:
+                pass
+
+    ping()
+    pong()
+    send('ping', 10001)
+    run()
+
+output:
+
+.. code-block:: bash
+
+    $ python coro.py
+    ping 10001
+    pong 20001
+    ping 10001
+    pong 20002
+
+C
+
+.. code-block:: c
+
+    #include <stdio.h>
+    #include <string.h>
+    #include <setjmp.h>
+
+    static jmp_buf jmp_ping, jmp_pong;
+
+    #define send(buf_a, buf_b, val)  \
+        do {                         \
+            r = setjmp(buf_a);       \
+            if (r == 0) {            \
+                longjmp(buf_b, val); \
+            }                        \
+        } while(0)
+
+    #define GEN_FUNC(func) void func
+
+
+    GEN_FUNC(ping) ();
+    GEN_FUNC(pong) ();
+
+    GEN_FUNC(ping) ()
+    {
+        int r = 0;
+
+        r = setjmp(jmp_ping);
+        if (r == 0) pong();
+        printf("ping %d\n", r);
+
+        /* ping -- 20001 -> pong */
+        send(jmp_ping, jmp_pong, 20001);
+        printf("ping %d\n", r);
+
+        /* ping -- 20002 -> pong */
+        send(jmp_ping, jmp_pong, 20002);
+
+    }
+
+    GEN_FUNC(pong) ()
+    {
+        int r = 0;
+
+        /* pong -- 10001 -> ping */
+        send(jmp_pong, jmp_ping, 10001);
+        printf("pong %d\n", r);
+
+        /* pong -- 10002 -> ping */
+        send(jmp_pong, jmp_ping, 10002);
+        printf("pong %d\n", r);
+    }
+
+    int main(int argc, char *argv[])
+    {
+        ping();
+        return 0;
+    }
+
+output:
+
+.. code-block:: bash
+
+    $ ./a.out
+    ping 10001
+    pong 20001
+    ping 10002
+    pong 20002
+
+
 Keyword Arguments in C
 ----------------------
 
@@ -610,11 +820,11 @@ C
        int a;
        int b;
        // virtual
-       func add; 
+       func add;
        func sub;
     };
     int add_func(Obj *self) {
-       return self-&t;a + self->b;
+       return self->a + self->b;
     }
     int sub_func(Obj *self) {
        return self->a - self->b;

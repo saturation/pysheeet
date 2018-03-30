@@ -2,6 +2,10 @@
 Python unicode cheatsheet
 ==========================
 
+.. contents:: Table of Contents
+    :backlinks: none
+
+
 Encode: unicode code point to bytes
 ------------------------------------
 

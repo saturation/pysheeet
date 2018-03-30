@@ -2,6 +2,29 @@
 Python Concurrency Cheatsheet
 =============================
 
+.. contents:: Table of Contents
+    :backlinks: none
+
+
+Execute a shell command
+------------------------
+
+.. code-block:: python
+
+    # get stdout, stderr, returncode
+
+    >>> from subprocess import Popen, PIPE
+    >>> args = ['time', 'echo', 'hello python']
+    >>> ret = Popen(args, stdout=PIPE, stderr=PIPE)
+    >>> out, err = ret.communicate()
+    >>> out
+    b'hello python\n'
+    >>> err
+    b'        0.00 real         0.00 user         0.00 sys\n'
+    >>> ret.returncode
+    0
+
+
 Create a thread via "threading"
 -------------------------------
 
@@ -214,7 +237,7 @@ Simplest synchronization primitive lock
     ...   lock.acquire()
     ...   print "task{0} get".format(id)
     ...   lock.release()
-    ... 
+    ...
     >>> t1=Thread(target=getlock,args=(1,))
     >>> t2=Thread(target=getlock,args=(2,))
     >>> t1.start();t2.start()
@@ -225,7 +248,7 @@ Simplest synchronization primitive lock
     >>> def getlock(id):
     ...   with lock:
     ...     print "task%d get" % id
-    ... 
+    ...
     >>> t1=Thread(target=getlock,args=(1,))
     >>> t2=Thread(target=getlock,args=(2,))
     >>> t1.start();t2.start()
@@ -250,13 +273,13 @@ Happen when more than one mutex lock.
     ...     time.sleep(3)
     ...     with lock2:
     ...       print "No deadlock"
-    ... 
+    ...
     >>> def task2():
     ...   with lock2:
     ...     print "get lock2"
     ...     with lock1:
     ...       print "No deadlock"
-    ... 
+    ...
     >>> t1=threading.Thread(target=task1)
     >>> t2=threading.Thread(target=task2)
     >>> t1.start();t2.start()
@@ -348,7 +371,7 @@ output:
 
 .. code-block:: console
 
-    python semaphore.py 
+    python semaphore.py
     0 acquire sema
     1 acquire sema
     2 acquire sema
@@ -483,28 +506,28 @@ Solving GIL problem via processes
 
     >>> from multiprocessing import Pool
     >>> def fib(n):
-    ...   if n >= 2:
-    ...     return 1
-    ...   return fib(n-1)+fib(n-2)
-    ... 
+    ...     if n <= 2:
+    ...         return 1
+    ...     return fib(n-1) + fib(n-2)
+    ...
     >>> def profile(func):
-    ...   def wrapper(*args, **kwargs):
-    ...     import time
-    ...     start = time.time()
-    ...     func(*args, **kwargs)
-    ...     end   = time.time()
-    ...     print end - start
-    ...   return wrapper
-    ... 
+    ...     def wrapper(*args, **kwargs):
+    ...         import time
+    ...         start = time.time()
+    ...         func(*args, **kwargs)
+    ...         end   = time.time()
+    ...         print end - start
+    ...     return wrapper
+    ...
     >>> @profile
     ... def nomultiprocess():
-    ...   map(fib,[35]*5)
-    ... 
+    ...     map(fib,[35]*5)
+    ...
     >>> @profile
     ... def hasmultiprocess():
-    ...   pool = Pool(5)
-    ...   pool.map(fib,[35]*5)
-    ... 
+    ...     pool = Pool(5)
+    ...     pool.map(fib,[35]*5)
+    ...
     >>> nomultiprocess()
     23.8454811573
     >>> hasmultiprocess()
@@ -526,14 +549,48 @@ Custom multiprocessing map
 
     def parmap(f,X):
         pipe=[Pipe() for x in X]
-        proc=[Process(target=spawn(f), 
-              args=(c,x)) 
+        proc=[Process(target=spawn(f),
+              args=(c,x))
               for x,(p,c) in izip(X,pipe)]
         [p.start() for p in proc]
         [p.join() for p in proc]
         return [p.recv() for (p,c) in pipe]
 
     print parmap(lambda x:x**x,range(1,5))
+
+
+Graceful way to kill all child processes
+-----------------------------------------
+
+.. code-block:: python
+
+    from __future__ import print_function
+
+    import signal
+    import os
+    import time
+
+    from multiprocessing import Process, Pipe
+
+    NUM_PROCESS = 10
+
+    def aurora(n):
+        while True:
+            time.sleep(n)
+
+    if __name__ == "__main__":
+        procs = [Process(target=aurora, args=(x,))
+                    for x in range(NUM_PROCESS)]
+        try:
+            for p in procs:
+                p.daemon = True
+                p.start()
+            [p.join() for p in procs]
+        finally:
+            for p in procs:
+                if not p.is_alive(): continue
+                os.kill(p.pid, signal.SIGKILL)
+
 
 Simple round-robin scheduler
 ----------------------------
@@ -544,7 +601,7 @@ Simple round-robin scheduler
     ...   if n <= 2:
     ...     return 1
     ...   return fib(n-1)+fib(n-2)
-    ... 
+    ...
     >>> def gen_fib(n):
     ...   for _ in range(1,n+1):
     ...     yield fib(_)
@@ -561,7 +618,7 @@ Simple round-robin scheduler
     ...       tasks.append(task)
     ...     except StopIteration:
     ...       print "done"
-    ... 
+    ...
     >>> run(tasks)
     1
     1
@@ -719,6 +776,36 @@ PoolExecutor
     9227465
     pocess cost: 5.538189888000488
 
+
+How to use ``ThreadPoolExecutor``?
+------------------------------------
+
+.. code-block:: python
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    def fib(n):
+        if n <= 2:
+            return 1
+        return fib(n - 1) + fib(n - 2)
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futs = []
+        for x in range(3):
+            futs.append(ex.submit(fib, 30+x))
+
+        res = [fut.result() for fut in futs]
+
+    print(res)
+
+output:
+
+.. code-block:: console
+
+    $ python3 thread_pool_ex.py
+    [832040, 1346269, 2178309]
+
+
 What "with ThreadPoolExecutor" doing?
 -------------------------------------
 
@@ -747,7 +834,7 @@ output:
 
 .. code-block:: console
 
-    $ python3 thread_pool_exec.py 
+    $ python3 thread_pool_exec.py
     832040
     832040
 

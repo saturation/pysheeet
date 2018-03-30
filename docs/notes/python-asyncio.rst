@@ -1,6 +1,10 @@
 Python asyncio cheatsheet
 =========================
 
+.. contents:: Table of Contents
+    :backlinks: none
+
+
 What is @asyncio.coroutine?
 ---------------------------
 
@@ -862,6 +866,35 @@ What is asynchronous context manager
     __aexit__
 
 
+decorator ``@asynccontextmanager``
+------------------------------------
+
+**New in Python 3.7**
+
+- Issue 29679_ - Add @contextlib.asynccontextmanager
+
+.. code-block:: python
+
+    >>> import asyncio
+    >>> from contextlib import asynccontextmanager
+    >>> @asynccontextmanager
+    ... async def coro(msg):
+    ...     await asyncio.sleep(1)
+    ...     yield msg
+    ...     await asyncio.sleep(0.5)
+    ...     print('done')
+    ...
+    >>> async def main():
+    ...     async with coro("Hello") as m:
+    ...         await asyncio.sleep(1)
+    ...         print(m)
+    ...
+    >>> loop = asyncio.get_event_loop()
+    >>> loop.run_until_complete(main())
+    Hello
+    done
+
+
 What `loop.sock_*` do?
 -----------------------
 
@@ -1479,3 +1512,6 @@ Simple asyncio WSGI web server
         loop.close()
 
     # Then open browser with url: localhost:9527/hello
+
+
+.. _29679: https://bugs.python.org/issue29679

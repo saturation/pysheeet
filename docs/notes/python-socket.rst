@@ -2,6 +2,10 @@
 Python socket cheatsheet
 ========================
 
+.. contents:: Table of Contents
+    :backlinks: none
+
+
 Get Hostname
 ------------
 
@@ -15,6 +19,36 @@ Get Hostname
     '172.20.10.4'
     >>> socket.gethostbyname('localhost')
     '127.0.0.1'
+
+Transform Host & Network Endian
+--------------------------------
+
+.. code-block:: python
+
+    # little-endian machine
+    >>> import socket
+    >>> a = 1 # host endian
+    >>> socket.htons(a) # network endian
+    256
+    >>> socket.htonl(a) # network endian
+    16777216
+    >>> socket.ntohs(256) # host endian
+    1
+    >>> socket.ntohl(16777216) # host endian
+    1
+
+    # big-endian machine
+    >>> import socket
+    >>> a = 1 # host endian
+    >>> socket.htons(a) # network endian
+    1
+    >>> socket.htonl(a) # network endian
+    1L
+    >>> socket.ntohs(1) # host endian
+    1
+    >>> socket.ntohl(1) # host endian
+    1L
+
 
 IP dotted-quad string & byte format convert
 -------------------------------------------
@@ -57,13 +91,13 @@ Simple TCP Echo Server
             sock.bind((self._host,self._port))
             sock.listen(10)
             self._sock = sock
-            return self._sock 
+            return self._sock
         def __exit__(self,*exc_info):
             if exc_info[0]:
                 import traceback
                 traceback.print_exception(*exc_info)
             self._sock.close()
-          
+
     if __name__ == '__main__':
         host = 'localhost'
         port = 5566
@@ -79,8 +113,116 @@ output:
 .. code-block:: console
 
     $ nc localhost 5566
-    Hello World 
     Hello World
+    Hello World
+
+Simple TCP Echo Server through IPv6
+------------------------------------
+
+.. code-block:: python
+
+    import contextlib
+    import socket
+
+    host = "::1"
+    port = 5566
+
+
+    @contextlib.contextmanager
+    def server(host, port):
+        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM, 0)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            s.listen(10)
+            yield s
+        finally:
+            s.close()
+
+
+    with server(host, port) as s:
+        try:
+            while True:
+                conn, addr = s.accept()
+                msg = conn.recv(1024)
+
+                if msg:
+                    conn.send(msg)
+
+                conn.close()
+        except KeyboardInterrupt:
+            pass
+
+output:
+
+.. code-block:: bash
+
+    $ python3 ipv6.py &
+    [1] 25752
+    $ nc -6 ::1 5566
+    Hello IPv6
+    Hello IPv6
+
+Disable IPv6 Only
+------------------
+
+.. code-block:: python
+
+    #!/usr/bin/env python3
+
+    import contextlib
+    import socket
+
+    host = "::"
+    port = 5566
+
+    @contextlib.contextmanager
+    def server(host: str, port: int):
+        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM, 0)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            s.bind((host, port))
+            s.listen(10)
+            yield s
+        finally:
+            s.close()
+
+
+    with server(host, port) as s:
+        try:
+            while True:
+                conn, addr = s.accept()
+                remote = conn.getpeername()
+                print(remote)
+                msg = conn.recv(1024)
+
+                if msg:
+                    conn.send(msg)
+
+                conn.close()
+        except KeyboardInterrupt:
+            pass
+
+output:
+
+.. code-block:: bash
+
+    $ python3 ipv6.py
+    [1] 23914
+    $ nc -4 127.0.0.1 5566
+    ('::ffff:127.0.0.1', 42604, 0, 0)
+    Hello IPv4
+    Hello IPv4
+    $ nc -6 ::1 5566
+    ('::1', 50882, 0, 0)
+    Hello IPv6
+    Hello IPv6
+    $ nc -6 fe80::a00:27ff:fe9b:50ee%enp0s3 5566
+    ('fe80::a00:27ff:fe9b:50ee%enp0s3', 42042, 0, 2)
+    Hello IPv6
+    Hello IPv6
+
 
 Simple TCP Echo Server Via SocketServer
 ---------------------------------------
@@ -92,9 +234,9 @@ Simple TCP Echo Server Via SocketServer
     >>> class handler(bh):
     ...   def handle(self):
     ...     data = self.request.recv(1024)
-    ...     print self.client_address
+    ...     print(self.client_address)
     ...     self.request.sendall(data)
-    ... 
+    ...
     >>> host = ('localhost',5566)
     >>> s = SocketServer.TCPServer(
     ...   host, handler)
@@ -104,13 +246,13 @@ output:
 
 .. code-block:: console
 
-    $ nc -u localhost 5566
+    $ nc localhost 5566
     Hello World
     Hello World
 
 
-Simple SSL TCP Echo Server
----------------------------
+Simple TLS/SSL TCP Echo Server
+--------------------------------
 
 .. code-block:: python
 
@@ -154,6 +296,64 @@ output:
     read:errno=0
 
 
+Set ciphers on TLS/SSL TCP Echo Server
+---------------------------------------
+
+.. code-block:: python
+
+    import socket
+    import json
+    import ssl
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 5566))
+    sock.listen(10)
+
+    sslctx = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
+    sslctx.load_cert_chain(certfile='cert.pem',
+                           keyfile='key.pem')
+    # set ssl ciphers
+    sslctx.set_ciphers('ECDH-ECDSA-AES128-GCM-SHA256')
+    print(json.dumps(sslctx.get_ciphers(), indent=2))
+
+    try:
+        while True:
+            conn, addr = sock.accept()
+            sslconn = sslctx.wrap_socket(conn, server_side=True)
+            msg = sslconn.recv(1024)
+            if msg:
+                sslconn.send(msg)
+            sslconn.close()
+    finally:
+        sock.close()
+
+output:
+
+.. code-block:: bash
+
+    $ openssl ecparam -out key.pem -genkey -name prime256v1
+    $ openssl req -x509 -new -key key.pem -out cert.pem
+    $ python3 tls.py&
+    [2] 64565
+    [
+      {
+        "id": 50380845,
+        "name": "ECDH-ECDSA-AES128-GCM-SHA256",
+        "protocol": "TLSv1/SSLv3",
+        "description": "ECDH-ECDSA-AES128-GCM-SHA256 TLSv1.2 Kx=ECDH/ECDSA Au=ECDH Enc=AESGCM(128) Mac=AEAD",
+        "strength_bits": 128,
+        "alg_bits": 128
+      }
+    ]
+    $ openssl s_client -connect localhost:5566 -cipher "ECDH-ECDSA-AES128-GCM-SHA256"
+    ...
+    ---
+    Hello ECDH-ECDSA-AES128-GCM-SHA256
+    Hello ECDH-ECDSA-AES128-GCM-SHA256
+    read:errno=0
+
+
 Simple UDP Echo Server
 ----------------------
 
@@ -187,7 +387,7 @@ Simple UDP Echo Server
 
 output:
 
-.. code-block:: console 
+.. code-block:: console
 
     $ nc -u localhost 5566
     Hello World
@@ -205,8 +405,8 @@ Simple UDP Echo Server Via SocketServer
     ...   def handle(self):
     ...     m,s = self.request
     ...     s.sendto(m,self.client_address)
-    ...     print self.client_address
-    ... 
+    ...     print(self.client_address)
+    ...
     >>> host = ('localhost',5566)
     >>> s = SocketServer.UDPServer(
     ...   host, handler)
@@ -419,10 +619,10 @@ Simple Asynchronous TCP Server - select
                 else:
                     msg = _.recv(1024)
                     ml[_.fileno()] = msg
-                    wl.append(_) 
+                    wl.append(_)
             # process ready to write
             for _ in w:
-                msg = ml[_.fileno()] 
+                msg = ml[_.fileno()]
                 _.send(msg)
                 wl.remove(_)
                 del ml[_.fileno()]
@@ -445,13 +645,432 @@ output: (bash 2)
     Ker Ker
     Ker Ker
 
+
+Simple Asynchronous TCP Server - poll
+--------------------------------------
+
+.. code-block:: python
+
+    from __future__ import print_function, unicode_literals
+
+    import socket
+    import select
+    import contextlib
+
+    host = 'localhost'
+    port = 5566
+
+    con = {}
+    req = {}
+    resp = {}
+
+    @contextlib.contextmanager
+    def Server(host,port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setblocking(False)
+            s.bind((host,port))
+            s.listen(10)
+            yield s
+        except socket.error:
+            print("Get socket error")
+            raise
+        finally:
+            if s: s.close()
+
+
+    @contextlib.contextmanager
+    def Poll():
+        try:
+            e = select.poll()
+            yield e
+        finally:
+            for fd, c in con.items():
+                e.unregister(fd)
+                c.close()
+
+
+    def accept(server, poll):
+        conn, addr = server.accept()
+        conn.setblocking(False)
+        fd = conn.fileno()
+        poll.register(fd, select.POLLIN)
+        req[fd] = conn
+        con[fd] = conn
+
+
+    def recv(fd, poll):
+        if fd not in req:
+            return
+
+        conn = req[fd]
+        msg = conn.recv(1024)
+        if msg:
+            resp[fd] = msg
+            poll.modify(fd, select.POLLOUT)
+        else:
+            conn.close()
+            del con[fd]
+
+        del req[fd]
+
+
+    def send(fd, poll):
+        if fd not in resp:
+            return
+
+        conn = con[fd]
+        msg = resp[fd]
+        b = 0
+        total = len(msg)
+        while total > b:
+            l = conn.send(msg)
+            msg = msg[l:]
+            b += l
+
+        del resp[fd]
+        req[fd] = conn
+        poll.modify(fd, select.POLLIN)
+
+    try:
+        with Server(host, port) as server, Poll() as poll:
+
+            poll.register(server.fileno())
+
+            while True:
+                events = poll.poll(1)
+                for fd, e in events:
+                    if fd == server.fileno():
+                        accept(server, poll)
+                    elif e & (select.POLLIN | select.POLLPRI):
+                        recv(fd, poll)
+                    elif e & select.POLLOUT:
+                        send(fd, poll)
+    except KeyboardInterrupt:
+        pass
+
+output: (bash 1)
+
+.. code-block:: console
+
+    $ python3 poll.py &
+    [1] 3036
+    $ nc localhost 5566
+    Hello poll
+    Hello poll
+    Hello Python Socket Programming
+    Hello Python Socket Programming
+
+output: (bash 2)
+
+.. code-block:: console
+
+    $ nc localhost 5566
+    Hello Python
+    Hello Python
+    Hello Awesome Python
+    Hello Awesome Python
+
+
+Simple Asynchronous TCP Server - epoll
+---------------------------------------
+
+.. code-block:: python
+
+    from __future__ import print_function, unicode_literals
+
+    import socket
+    import select
+    import contextlib
+
+
+    host = 'localhost'
+    port = 5566
+
+    con = {}
+    req = {}
+    resp = {}
+
+    @contextlib.contextmanager
+    def Server(host,port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setblocking(False)
+            s.bind((host,port))
+            s.listen(10)
+            yield s
+        except socket.error:
+            print("Get socket error")
+            raise
+        finally:
+            if s: s.close()
+
+
+    @contextlib.contextmanager
+    def Epoll():
+        try:
+            e = select.epoll()
+            yield e
+        finally:
+            for fd in con: e.unregister(fd)
+            e.close()
+
+
+    def accept(server, epoll):
+        conn, addr = server.accept()
+        conn.setblocking(0)
+        fd = conn.fileno()
+        epoll.register(fd, select.EPOLLIN)
+        req[fd] = conn
+        con[fd] = conn
+
+
+    def recv(fd, epoll):
+        if fd not in req:
+            return
+
+        conn = req[fd]
+        msg = conn.recv(1024)
+        if msg:
+            resp[fd] = msg
+            epoll.modify(fd, select.EPOLLOUT)
+        else:
+            conn.close()
+            del con[fd]
+
+        del req[fd]
+
+
+    def send(fd, epoll):
+        if fd not in resp:
+            return
+
+        conn = con[fd]
+        msg = resp[fd]
+        b = 0
+        total = len(msg)
+        while total > b:
+            l = conn.send(msg)
+            msg = msg[l:]
+            b += l
+
+        del resp[fd]
+        req[fd] = conn
+        epoll.modify(fd, select.EPOLLIN)
+
+
+    try:
+        with Server(host, port) as server, Epoll() as epoll:
+
+            epoll.register(server.fileno())
+
+            while True:
+                events = epoll.poll(1)
+                for fd, e in events:
+                    if fd == server.fileno():
+                        accept(server, epoll)
+                    elif e & select.EPOLLIN:
+                        recv(fd, epoll)
+                    elif e & select.EPOLLOUT:
+                        send(fd, epoll)
+    except KeyboardInterrupt:
+        pass
+
+
+output: (bash 1)
+
+.. code-block:: console
+
+    $ python3 epoll.py &
+    [1] 3036
+    $ nc localhost 5566
+    Hello epoll
+    Hello epoll
+    Hello Python Socket Programming
+    Hello Python Socket Programming
+
+output: (bash 2)
+
+.. code-block:: console
+
+    $ nc localhost 5566
+    Hello Python
+    Hello Python
+    Hello Awesome Python
+    Hello Awesome Python
+
+
+Simple Asynchronous TCP Server - kqueue
+----------------------------------------
+
+.. code-block:: python
+
+    from __future__ import print_function, unicode_literals
+
+    import socket
+    import select
+    import contextlib
+
+    if not hasattr(select, 'kqueue'):
+        print("Not support kqueue")
+        exit(1)
+
+
+    host = 'localhost'
+    port = 5566
+
+    con = {}
+    req = {}
+    resp = {}
+
+    @contextlib.contextmanager
+    def Server(host,port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.setblocking(False)
+            s.bind((host,port))
+            s.listen(10)
+            yield s
+        except socket.error:
+            print("Get socket error")
+            raise
+        finally:
+            if s: s.close()
+
+
+    @contextlib.contextmanager
+    def Kqueue():
+        try:
+            kq = select.kqueue()
+            yield kq
+        finally:
+            kq.close()
+            for fd, c in con.items(): c.close()
+
+
+    def accept(server, kq):
+        conn, addr = server.accept()
+        conn.setblocking(False)
+        fd = conn.fileno()
+        ke = select.kevent(conn.fileno(),
+                           select.KQ_FILTER_READ,
+                           select.KQ_EV_ADD)
+        kq.control([ke], 0)
+        req[fd] = conn
+        con[fd] = conn
+
+
+    def recv(fd, kq):
+        if fd not in req:
+            return
+
+        conn = req[fd]
+        msg = conn.recv(1024)
+        if msg:
+            resp[fd] = msg
+            # remove read event
+            ke = select.kevent(fd,
+                               select.KQ_FILTER_READ,
+                               select.KQ_EV_DELETE)
+            kq.control([ke], 0)
+            # add write event
+            ke = select.kevent(fd,
+                               select.KQ_FILTER_WRITE,
+                               select.KQ_EV_ADD)
+            kq.control([ke], 0)
+            req[fd] = conn
+            con[fd] = conn
+        else:
+            conn.close()
+            del con[fd]
+
+        del req[fd]
+
+
+    def send(fd, kq):
+        if fd not in resp:
+            return
+
+        conn = con[fd]
+        msg = resp[fd]
+        b = 0
+        total = len(msg)
+        while total > b:
+            l = conn.send(msg)
+            msg = msg[l:]
+            b += l
+
+        del resp[fd]
+        req[fd] = conn
+        # remove write event
+        ke = select.kevent(fd,
+                           select.KQ_FILTER_WRITE,
+                           select.KQ_EV_DELETE)
+        kq.control([ke], 0)
+        # add read event
+        ke = select.kevent(fd,
+                           select.KQ_FILTER_READ,
+                           select.KQ_EV_ADD)
+        kq.control([ke], 0)
+
+
+    try:
+        with Server(host, port) as server, Kqueue() as kq:
+
+            max_events = 1024
+            timeout = 1
+
+            ke = select.kevent(server.fileno(),
+                               select.KQ_FILTER_READ,
+                               select.KQ_EV_ADD)
+
+            kq.control([ke], 0)
+            while True:
+                events = kq.control(None, max_events, timeout)
+                for e in events:
+                    fd = e.ident
+                    if fd == server.fileno():
+                        accept(server, kq)
+                    elif e.filter == select.KQ_FILTER_READ:
+                        recv(fd, kq)
+                    elif e.filter == select.KQ_FILTER_WRITE:
+                        send(fd, kq)
+    except KeyboardInterrupt:
+        pass
+
+output: (bash 1)
+
+.. code-block:: console
+
+    $ python3 kqueue.py &
+    [1] 3036
+    $ nc localhost 5566
+    Hello kqueue
+    Hello kqueue
+    Hello Python Socket Programming
+    Hello Python Socket Programming
+
+output: (bash 2)
+
+.. code-block:: console
+
+    $ nc localhost 5566
+    Hello Python
+    Hello Python
+    Hello Awesome Python
+    Hello Awesome Python
+
+
 High-Level API - selectors
 --------------------------
 
 .. code-block:: python
 
     # Pyton3.4+ only
-    # Reference: selectors 
+    # Reference: selectors
     import selectors
     import socket
     import contextlib
@@ -473,7 +1092,7 @@ High-Level API - selectors
                 s.close()
 
     def read_handler(conn, sel):
-        msg = conn.recv(1024) 
+        msg = conn.recv(1024)
         if msg:
             conn.send(msg)
         else:
@@ -499,7 +1118,7 @@ output: (bash 1)
 .. code-block:: console
 
     $ nc localhost 5566
-    Hello 
+    Hello
     Hello
 
 output: (bash 1)
@@ -509,6 +1128,105 @@ output: (bash 1)
     $ nc localhost 5566
     Hi
     Hi
+
+
+Simple Non-blocking TLS/SSL socket via selectors
+--------------------------------------------------
+
+.. code-block:: python
+
+    import socket
+    import selectors
+    import contextlib
+    import ssl
+
+    from functools import partial
+
+    sslctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    sslctx.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
+
+    @contextlib.contextmanager
+    def Server(host,port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host,port))
+            s.listen(10)
+            sel = selectors.DefaultSelector()
+            yield s, sel
+        except socket.error:
+            print("Get socket error")
+            raise
+        finally:
+            if s: s.close()
+            if sel: sel.close()
+
+
+    def accept(s, sel):
+        conn, _ = s.accept()
+        sslconn = sslctx.wrap_socket(conn,
+                                     server_side=True,
+                                     do_handshake_on_connect=False)
+        sel.register(sslconn, selectors.EVENT_READ, do_handshake)
+
+
+    def do_handshake(sslconn, sel):
+        sslconn.do_handshake()
+        sel.modify(sslconn, selectors.EVENT_READ, read)
+
+
+    def read(sslconn, sel):
+        msg = sslconn.recv(1024)
+        if msg:
+            sel.modify(sslconn,
+                       selectors.EVENT_WRITE,
+                       partial(write, msg=msg))
+        else:
+            sel.unregister(sslconn)
+            sslconn.close()
+
+
+    def write(sslconn, sel, msg=None):
+        if msg:
+            sslconn.send(msg)
+        sel.modify(sslconn, selectors.EVENT_READ, read)
+
+
+    host = 'localhost'
+    port = 5566
+    try:
+        with Server(host, port) as (s,sel):
+            sel.register(s, selectors.EVENT_READ, accept)
+            while True:
+                events = sel.select()
+                for sel_key, m in events:
+                    handler = sel_key.data
+                    handler(sel_key.fileobj, sel)
+    except KeyboardInterrupt:
+        pass
+
+
+output:
+
+.. code-block:: console
+
+    # console 1
+    $ openssl genrsa -out key.pem 2048
+    $ openssl req -x509 -new -nodes -key key.pem -days 365 -out cert.pem
+    $ python3 ssl_tcp_server.py &
+    $ openssl s_client -connect localhost:5566
+    ...
+    ---
+    Hello TLS
+    Hello TLS
+
+    # console 2
+    $ openssl s_client -connect localhost:5566
+    ...
+    ---
+    Hello SSL
+    Hello SSL
+
 
 "socketpair" - Similar to PIPE
 ------------------------------
@@ -523,7 +1241,7 @@ output: (bash 1)
     try:
         pid = os.fork()
     except OSError:
-        print "Fork Error"
+        print("Fork Error")
         raise
 
     if pid:
@@ -532,7 +1250,7 @@ output: (bash 1)
         while True:
             p_s.sendall("Hi! Child!")
             msg = p_s.recv(1024)
-            print msg
+            print(msg)
             time.sleep(3)
         os.wait()
     else:
@@ -540,7 +1258,7 @@ output: (bash 1)
         p_s.close()
         while True:
             msg = c_s.recv(1024)
-            print msg
+            print(msg)
             c_s.sendall("Hi! Parent!")
 
 output:
@@ -554,12 +1272,640 @@ output:
     Hi! Parent!
     ...
 
+Using sendfile do copy
+------------------------
+
+.. code-block:: python
+
+    # need python 3.3 or above
+    from __future__ import print_function, unicode_literals
+
+    import os
+    import sys
+
+    if len(sys.argv) != 3:
+        print("Usage: cmd src dst")
+        exit(1)
+
+    src = sys.argv[1]
+    dst = sys.argv[2]
+
+    with open(src, 'r') as s, open(dst, 'w') as d:
+        st = os.fstat(s.fileno())
+
+        offset = 0
+        count = 4096
+        s_len = st.st_size
+
+        sfd = s.fileno()
+        dfd = d.fileno()
+
+        while s_len > 0:
+            ret = os.sendfile(dfd, sfd, offset, count)
+            offset += ret
+            s_len -= ret
+
+output:
+
+.. code-block:: console
+
+    $ dd if=/dev/urandom of=dd.in bs=1M count=1024
+    1024+0 records in
+    1024+0 records out
+    1073741824 bytes (1.1 GB, 1.0 GiB) copied, 108.02 s, 9.9 MB/s
+    $ python3 sendfile.py dd.in dd.out
+    $ md5sum dd.in
+    e79afdd6aba71b7174142c0bbc289674  dd.in
+    $ md5sum dd.out
+    e79afdd6aba71b7174142c0bbc289674  dd.out
+
+
+Sending a file through sendfile
+---------------------------------
+
+.. code-block:: python
+
+    # need python 3.5 or above
+    from __future__ import print_function, unicode_literals
+
+    import os
+    import sys
+    import time
+    import socket
+    import contextlib
+
+    @contextlib.contextmanager
+    def server(host, port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            s.listen(10)
+            yield s
+        finally:
+            s.close()
+
+
+    @contextlib.contextmanager
+    def client(host, port):
+        try:
+            c = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            c.connect((host, port))
+            yield c
+        finally:
+            c.close()
+
+
+    def do_sendfile(fout, fin, count, fin_len):
+        l = fin_len
+        offset = 0
+        while l > 0:
+            ret = fout.sendfile(fin, offset, count)
+            offset += ret
+            l -= ret
+
+
+    def do_recv(fout, fin):
+        while True:
+            data = fin.recv(4096)
+
+            if not data: break
+
+            fout.write(data)
+
+
+    host = 'localhost'
+    port = 5566
+
+    if len(sys.argv) != 3:
+        print("usage: cmd src dst")
+        exit(1)
+
+    src = sys.argv[1]
+    dst = sys.argv[2]
+    offset = 0
+
+    pid = os.fork()
+
+    if pid ==  0:
+        # client
+        time.sleep(3)
+        with client(host, port) as c, open(src, 'rb') as f:
+            fd = f.fileno()
+            st = os.fstat(fd)
+            count = 4096
+
+            flen = st.st_size
+            do_sendfile(c, f, count, flen)
+
+    else:
+        # server
+        with server(host, port) as s, open(dst, 'wb') as f:
+            conn, addr = s.accept()
+            do_recv(f, conn)
+
+output:
+
+.. code-block:: console
+
+    $ dd if=/dev/urandom of=dd.in bs=1M count=512
+    512+0 records in
+    512+0 records out
+    536870912 bytes (537 MB, 512 MiB) copied, 3.17787 s, 169 MB/s
+    $ python3 sendfile.py dd.in dd.out
+    $ md5sum dd.in
+    eadfd96c85976b1f46385e89dfd9c4a8  dd.in
+    $ md5sum dd.out
+    eadfd96c85976b1f46385e89dfd9c4a8  dd.out
+
+
+Linux kernel Crypto API - AF_ALG
+---------------------------------
+
+.. code-block:: python
+
+    # need python 3.6 or above & Linux >=2.6.38
+    import socket
+    import hashlib
+    import contextlib
+
+    @contextlib.contextmanager
+    def create_alg(typ, name):
+        s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+        try:
+            s.bind((typ, name))
+            yield s
+        finally:
+            s.close()
+
+    msg = b'Python is awesome!'
+
+    with create_alg('hash', 'sha256') as algo:
+        op, _ = algo.accept()
+        with op:
+            op.sendall(msg)
+            data = op.recv(512)
+            print(data.hex())
+
+            # check data
+            h = hashlib.sha256(msg).digest()
+            if h != data:
+                raise Exception(f"sha256({h}) != af_alg({data})")
+
+output:
+
+.. code-block:: console
+
+    $ python3 af_alg.py
+    9d50bcac2d5e33f936ec2db7dc7b6579cba8e1b099d77c31d8564df46f66bdf5
+
+
+AES-CBC encrypt/decrypt via AF_ALG
+-----------------------------------
+
+.. code-block:: python
+
+    # need python 3.6 or above & Linux >=4.3
+    import contextlib
+    import socket
+    import os
+
+    BS = 16  # Bytes
+    pad = lambda s: s + (BS - len(s) % BS) * \
+                     chr(BS - len(s) % BS).encode('utf-8')
+
+    upad = lambda s : s[0:-s[-1]]
+
+
+    @contextlib.contextmanager
+    def create_alg(typ, name):
+        s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+        try:
+            s.bind((typ, name))
+            yield s
+        finally:
+            s.close()
+
+
+    def encrypt(plaintext, key, iv):
+        ciphertext = None
+        with create_alg('skcipher', 'cbc(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG, socket.ALG_SET_KEY, key)
+            op, _ = algo.accept()
+            with op:
+                plaintext = pad(plaintext)
+                op.sendmsg_afalg([plaintext],
+                                 op=socket.ALG_OP_ENCRYPT,
+                                 iv=iv)
+                ciphertext = op.recv(len(plaintext))
+
+        return ciphertext
+
+
+    def decrypt(ciphertext, key, iv):
+        plaintext = None
+        with create_alg('skcipher', 'cbc(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG, socket.ALG_SET_KEY, key)
+            op, _ = algo.accept()
+            with op:
+                op.sendmsg_afalg([ciphertext],
+                                 op=socket.ALG_OP_DECRYPT,
+                                 iv=iv)
+                plaintext = op.recv(len(ciphertext))
+
+        return upad(plaintext)
+
+
+    key = os.urandom(32)
+    iv  = os.urandom(16)
+
+    plaintext = b"Demo AF_ALG"
+    ciphertext = encrypt(plaintext, key, iv)
+    plaintext = decrypt(ciphertext, key, iv)
+
+    print(ciphertext.hex())
+    print(plaintext)
+
+output:
+
+.. code-block:: console
+
+    $ python3 aes_cbc.py
+    01910e4bd6932674dba9bebd4fdf6cf2
+    b'Demo AF_ALG'
+
+
+AES-GCM encrypt/decrypt via AF_ALG
+-----------------------------------
+
+.. code-block:: python
+
+    # need python 3.6 or above & Linux >=4.9
+    import contextlib
+    import socket
+    import os
+
+    @contextlib.contextmanager
+    def create_alg(typ, name):
+        s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+        try:
+            s.bind((typ, name))
+            yield s
+        finally:
+            s.close()
+
+
+    def encrypt(key, iv, assoc, taglen, plaintext):
+        """ doing aes-gcm encrypt
+
+        :param key: the aes symmetric key
+        :param iv: initial vector
+        :param assoc: associated data (integrity protection)
+        :param taglen: authenticator tag len
+        :param plaintext: plain text data
+        """
+
+        assoclen = len(assoc)
+        ciphertext = None
+        tag = None
+
+        with create_alg('aead', 'gcm(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+
+            op, _ = algo.accept()
+            with op:
+                msg = assoc + plaintext
+                op.sendmsg_afalg([msg],
+                                 op=socket.ALG_OP_ENCRYPT,
+                                 iv=iv,
+                                 assoclen=assoclen)
+
+                res = op.recv(assoclen + len(plaintext) + taglen)
+                ciphertext = res[assoclen:-taglen]
+                tag = res[-taglen:]
+
+        return ciphertext, tag
+
+
+    def decrypt(key, iv, assoc, tag, ciphertext):
+        """ doing aes-gcm decrypt
+
+        :param key: the AES symmetric key
+        :param iv: initial vector
+        :param assoc: associated data (integrity protection)
+        :param tag: the GCM authenticator tag
+        :param ciphertext: cipher text data
+        """
+        plaintext = None
+        assoclen = len(assoc)
+
+        with create_alg('aead', 'gcm(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+            op, _ = algo.accept()
+            with op:
+                msg = assoc + ciphertext + tag
+                op.sendmsg_afalg([msg],
+                                 op=socket.ALG_OP_DECRYPT, iv=iv,
+                                 assoclen=assoclen)
+
+                taglen = len(tag)
+                res = op.recv(len(msg) - taglen)
+                plaintext = res[assoclen:]
+
+        return plaintext
+
+    key = os.urandom(16)
+    iv  = os.urandom(12)
+    assoc = os.urandom(16)
+
+    plaintext = b"Hello AES-GCM"
+    ciphertext, tag = encrypt(key, iv, assoc, 16, plaintext)
+    plaintext = decrypt(key, iv, assoc, tag, ciphertext)
+
+    print(ciphertext.hex())
+    print(plaintext)
+
+output:
+
+.. code-block:: console
+
+	$ python3 aes_gcm.py
+	2e27b67234e01bcb0ab6b451f4f870ce
+	b'Hello AES-GCM'
+
+
+AES-GCM encrypt/decrypt file with sendfile
+-------------------------------------------
+
+.. code-block:: python
+
+    # need python 3.6 or above & Linux >=4.9
+    import contextlib
+    import socket
+    import sys
+    import os
+
+    @contextlib.contextmanager
+    def create_alg(typ, name):
+        s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+        try:
+            s.bind((typ, name))
+            yield s
+        finally:
+            s.close()
+
+
+    def encrypt(key, iv, assoc, taglen, pfile):
+        assoclen = len(assoc)
+        ciphertext = None
+        tag = None
+
+        pfd = pfile.fileno()
+        offset = 0
+        st = os.fstat(pfd)
+        totalbytes = st.st_size
+
+        with create_alg('aead', 'gcm(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+
+            op, _ = algo.accept()
+            with op:
+                op.sendmsg_afalg(op=socket.ALG_OP_ENCRYPT,
+                                 iv=iv,
+                                 assoclen=assoclen,
+                                 flags=socket.MSG_MORE)
+
+                op.sendall(assoc, socket.MSG_MORE)
+
+                # using sendfile to encrypt file data
+                os.sendfile(op.fileno(), pfd, offset, totalbytes)
+
+                res = op.recv(assoclen + totalbytes + taglen)
+                ciphertext = res[assoclen:-taglen]
+                tag = res[-taglen:]
+
+        return ciphertext, tag
+
+
+    def decrypt(key, iv, assoc, tag, ciphertext):
+        plaintext = None
+        assoclen = len(assoc)
+
+        with create_alg('aead', 'gcm(aes)') as algo:
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+            algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+            op, _ = algo.accept()
+            with op:
+                msg = assoc + ciphertext + tag
+                op.sendmsg_afalg([msg],
+                                 op=socket.ALG_OP_DECRYPT, iv=iv,
+                                 assoclen=assoclen)
+
+                taglen = len(tag)
+                res = op.recv(len(msg) - taglen)
+                plaintext = res[assoclen:]
+
+        return plaintext
+
+    key = os.urandom(16)
+    iv  = os.urandom(12)
+    assoc = os.urandom(16)
+
+    if len(sys.argv) != 2:
+        print("usage: cmd plain")
+        exit(1)
+
+    plain = sys.argv[1]
+
+    with open(plain, 'r') as pf:
+        ciphertext, tag = encrypt(key, iv, assoc, 16, pf)
+        plaintext = decrypt(key, iv, assoc, tag, ciphertext)
+
+        print(ciphertext.hex())
+        print(plaintext)
+
+
+output:
+
+.. code-block:: console
+
+    $ echo "Test AES-GCM with sendfile" > plain.txt
+    $ python3 aes_gcm.py plain.txt
+    b3800044520ed07fa7f20b29c2695bae9ab596065359db4f009dd6
+    b'Test AES-GCM with sendfile\n'
+
+
+Compare the performance of AF_ALG to cryptography
+--------------------------------------------------
+
+.. code-block:: python
+
+    # need python 3.6 or above & Linux >=4.9
+    import contextlib
+    import socket
+    import time
+    import os
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    @contextlib.contextmanager
+    def create_alg(typ, name):
+        s = socket.socket(socket.AF_ALG, socket.SOCK_SEQPACKET, 0)
+        try:
+            s.bind((typ, name))
+            yield s
+        finally:
+            s.close()
+
+
+    def encrypt(key, iv, assoc, taglen, op, pfile, psize):
+        assoclen = len(assoc)
+        ciphertext = None
+        tag = None
+        offset = 0
+
+        pfd = pfile.fileno()
+        totalbytes = psize
+
+        op.sendmsg_afalg(op=socket.ALG_OP_ENCRYPT,
+                         iv=iv,
+                         assoclen=assoclen,
+                         flags=socket.MSG_MORE)
+
+        op.sendall(assoc, socket.MSG_MORE)
+
+        # using sendfile to encrypt file data
+        os.sendfile(op.fileno(), pfd, offset, totalbytes)
+
+        res = op.recv(assoclen + totalbytes + taglen)
+        ciphertext = res[assoclen:-taglen]
+        tag = res[-taglen:]
+
+        return ciphertext, tag
+
+
+    def decrypt(key, iv, assoc, tag, op, ciphertext):
+        plaintext = None
+        assoclen = len(assoc)
+
+        msg = assoc + ciphertext + tag
+        op.sendmsg_afalg([msg],
+                         op=socket.ALG_OP_DECRYPT, iv=iv,
+                         assoclen=assoclen)
+
+        taglen = len(tag)
+        res = op.recv(len(msg) - taglen)
+        plaintext = res[assoclen:]
+
+        return plaintext
+
+
+    key = os.urandom(16)
+    iv  = os.urandom(12)
+    assoc = os.urandom(16)
+    assoclen = len(assoc)
+
+    count = 1000000
+    plain = "tmp.rand"
+
+    # crate a tmp file
+    with open(plain, 'wb') as f:
+        f.write(os.urandom(4096))
+        f.flush()
+
+
+    # profile AF_ALG with sendfile (zero-copy)
+    with open(plain, 'rb') as pf,\
+         create_alg('aead', 'gcm(aes)') as enc_algo,\
+         create_alg('aead', 'gcm(aes)') as dec_algo:
+
+        enc_algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+        enc_algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+
+        dec_algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_KEY, key)
+        dec_algo.setsockopt(socket.SOL_ALG,
+                            socket.ALG_SET_AEAD_AUTHSIZE,
+                            None,
+                            assoclen)
+
+        enc_op, _ = enc_algo.accept()
+        dec_op, _ = dec_algo.accept()
+
+        st = os.fstat(pf.fileno())
+        psize = st.st_size
+
+        with enc_op, dec_op:
+
+            s = time.time()
+
+            for _ in range(count):
+                ciphertext, tag = encrypt(key, iv, assoc, 16, enc_op, pf, psize)
+                plaintext = decrypt(key, iv, assoc, tag, dec_op, ciphertext)
+
+            cost = time.time() - s
+
+            print(f"total cost time: {cost}. [AF_ALG]")
+
+
+    # profile cryptography (no zero-copy)
+    with open(plain, 'rb') as pf:
+
+        aesgcm = AESGCM(key)
+
+        s = time.time()
+
+        for _ in range(count):
+            pf.seek(0, 0)
+            plaintext = pf.read()
+            ciphertext = aesgcm.encrypt(iv, plaintext, assoc)
+            plaintext = aesgcm.decrypt(iv, ciphertext, assoc)
+
+        cost = time.time() - s
+
+        print(f"total cost time: {cost}. [cryptography]")
+
+    # clean up
+    os.remove(plain)
+
+output:
+
+.. code-block:: console
+
+    $ python3 aes-gcm.py
+    total cost time: 15.317010641098022. [AF_ALG]
+    total cost time: 50.256704807281494. [cryptography]
+
+
 Sniffer IP packets
 ------------------
 
 .. code-block:: python
 
-    from ctypes import * 
+    from ctypes import *
     import socket
     import struct
 
@@ -612,24 +1958,24 @@ Sniffer IP packets
             try:
                 self.proto = PROTO_MAP[self.ip_p]
             except KeyError:
-                print "{} Not in map".format(self.ip_p)
+                print("{} Not in map".format(self.ip_p))
                 raise
 
     host = '0.0.0.0'
     s = socket.socket(socket.AF_INET,
-                      socket.SOCK_RAW, 
+                      socket.SOCK_RAW,
                       socket.IPPROTO_ICMP)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
     s.bind((host, 0))
 
-    print "Sniffer start..."
+    print("Sniffer start...")
     try:
         while True:
             buf = s.recvfrom(65535)[0]
             ip_header = IP(buf[:20])
-            print '{0}: {1} -> {2}'.format(ip_header.proto,
+            print('{0}: {1} -> {2}'.format(ip_header.proto,
                                            ip_header.src,
-                                           ip_header.dst)
+                                           ip_header.dst))
     except KeyboardInterrupt:
         s.close()
 
@@ -658,13 +2004,191 @@ output: (bash 2)
     round-trip min/avg/max/stddev = 0.063/0.103/0.159/0.041 ms
 
 
+Sniffer TCP packet
+------------------
+
+.. code-block:: python
+
+    #!/usr/bin/env python3.6
+    """
+    Based on RFC-793, the following figure shows the TCP header format:
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |          Source Port          |       Destination Port        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                        Sequence Number                        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                    Acknowledgment Number                      |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |  Data |           |U|A|P|R|S|F|                               |
+    | Offset| Reserved  |R|C|S|S|Y|I|            Window             |
+    |       |           |G|K|H|T|N|N|                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |           Checksum            |         Urgent Pointer        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                    Options                    |    Padding    |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                             data                              |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+    In linux api (uapi/linux/tcp.h), it defines the TCP header:
+
+    struct tcphdr {
+        __be16  source;
+        __be16  dest;
+        __be32  seq;
+        __be32  ack_seq;
+    #if defined(__LITTLE_ENDIAN_BITFIELD)
+        __u16   res1:4,
+                doff:4,
+                fin:1,
+                syn:1,
+                rst:1,
+                psh:1,
+                ack:1,
+                urg:1,
+                ece:1,
+                cwr:1;
+    #elif defined(__BIG_ENDIAN_BITFIELD)
+        __u16   doff:4,
+                res1:4,
+                cwr:1,
+                ece:1,
+                urg:1,
+                ack:1,
+                psh:1,
+                rst:1,
+                syn:1,
+                fin:1;
+    #else
+    #error      "Adjust your <asm/byteorder.h> defines"
+    #endif
+        __be16  window;
+        __sum16 check;
+        __be16  urg_ptr;
+    };
+    """
+    import sys
+    import socket
+    import platform
+
+    from struct import unpack
+    from contextlib import contextmanager
+
+    un = platform.system()
+    if un != "Linux":
+        print(f"{un} is not supported!")
+        sys.exit(1)
+
+    @contextmanager
+    def create_socket():
+        ''' Create a TCP raw socket '''
+        s = socket.socket(socket.AF_INET,
+                          socket.SOCK_RAW,
+                          socket.IPPROTO_TCP)
+        try:
+            yield s
+        finally:
+            s.close()
+
+
+    try:
+        with create_socket() as s:
+            while True:
+                pkt, addr = s.recvfrom(65535)
+
+                # the first 20 bytes are ip header
+                iphdr = unpack('!BBHHHBBH4s4s', pkt[0:20])
+                iplen = (iphdr[0] & 0xf) * 4
+
+                # the next 20 bytes are tcp header
+                tcphdr = unpack('!HHLLBBHHH', pkt[iplen:iplen+20])
+                source = tcphdr[0]
+                dest = tcphdr[1]
+                seq = tcphdr[2]
+                ack_seq = tcphdr[3]
+                dr = tcphdr[4]
+                flags = tcphdr[5]
+                window = tcphdr[6]
+                check = tcphdr[7]
+                urg_ptr = tcphdr[8]
+
+                doff = dr >> 4
+                fin = flags & 0x01
+                syn = flags & 0x02
+                rst = flags & 0x04
+                psh = flags & 0x08
+                ack = flags & 0x10
+                urg = flags & 0x20
+                ece = flags & 0x40
+                cwr = flags & 0x80
+
+                tcplen = (doff) * 4
+                h_size = iplen + tcplen
+
+                #get data from the packet
+                data = pkt[h_size:]
+
+                if not data:
+                    continue
+
+                print("------------ TCP_HEADER --------------")
+                print(f"Source Port:           {source}")
+                print(f"Destination Port:      {dest}")
+                print(f"Sequence Number:       {seq}")
+                print(f"Acknowledgment Number: {ack_seq}")
+                print(f"Data offset:           {doff}")
+                print(f"FIN:                   {fin}")
+                print(f"SYN:                   {syn}")
+                print(f"RST:                   {rst}")
+                print(f"PSH:                   {psh}")
+                print(f"ACK:                   {ack}")
+                print(f"URG:                   {urg}")
+                print(f"ECE:                   {ece}")
+                print(f"CWR:                   {cwr}")
+                print(f"Window:                {window}")
+                print(f"Checksum:              {check}")
+                print(f"Urgent Point:          {urg_ptr}")
+                print("--------------- DATA -----------------")
+                print(data)
+
+    except KeyboardInterrupt:
+        pass
+
+output:
+
+.. code-block:: console
+
+    $ python3.6 tcp.py
+    ------------ TCP_HEADER --------------
+    Source Port:           38352
+    Destination Port:      8000
+    Sequence Number:       2907801591
+    Acknowledgment Number: 398995857
+    Data offset:           8
+    FIN:                   0
+    SYN:                   0
+    RST:                   0
+    PSH:                   8
+    ACK:                   16
+    URG:                   0
+    ECE:                   0
+    CWR:                   0
+    Window:                342
+    Checksum:              65142
+    Urgent Point:          0
+    --------------- DATA -----------------
+    b'GET / HTTP/1.1\r\nHost: localhost:8000\r\nUser-Agent: curl/7.47.0\r\nAccept: */*\r\n\r\n'
+
 Sniffer ARP packet
 ------------------
 
 .. code-block:: python
 
     """
-    Ehternet Packet Header 
+    Ehternet Packet Header
 
     struct ethhdr {
         unsigned char h_dest[ETH_ALEN];   /* destination eth addr */
@@ -707,32 +2231,32 @@ Sniffer ARP packet
         ethtype = eth[2]
         if ethtype != '\x08\x06': continue
 
-        print "---------------- ETHERNET_FRAME ----------------"
-        print "Dest MAC:        ", binascii.hexlify(eth[0])
-        print "Source MAC:      ", binascii.hexlify(eth[1])
-        print "Type:            ", binascii.hexlify(ethtype)
-        print "----------------- ARP_HEADER -------------------"
-        print "Hardware type:   ", binascii.hexlify(arp[0])
-        print "Protocol type:   ", binascii.hexlify(arp[1])
-        print "Hardware size:   ", binascii.hexlify(arp[2])
-        print "Protocol size:   ", binascii.hexlify(arp[3])
-        print "Opcode:          ", binascii.hexlify(arp[4])
-        print "Source MAC:      ", binascii.hexlify(arp[5])
-        print "Source IP:       ", socket.inet_ntoa(arp[6])
-        print "Dest MAC:        ", binascii.hexlify(arp[7])
-        print "Dest IP:         ", socket.inet_ntoa(arp[8])
-        print "------------------------------------------------\n"
+        print("-------------- ETHERNET_FRAME -------------")
+        print("Dest MAC:        ", binascii.hexlify(eth[0]))
+        print("Source MAC:      ", binascii.hexlify(eth[1]))
+        print("Type:            ", binascii.hexlify(ethtype))
+        print("--------------- ARP_HEADER ----------------")
+        print("Hardware type:   ", binascii.hexlify(arp[0]))
+        print("Protocol type:   ", binascii.hexlify(arp[1]))
+        print("Hardware size:   ", binascii.hexlify(arp[2]))
+        print("Protocol size:   ", binascii.hexlify(arp[3]))
+        print("Opcode:          ", binascii.hexlify(arp[4]))
+        print("Source MAC:      ", binascii.hexlify(arp[5]))
+        print("Source IP:       ", socket.inet_ntoa(arp[6]))
+        print("Dest MAC:        ", binascii.hexlify(arp[7]))
+        print("Dest IP:         ", socket.inet_ntoa(arp[8]))
+        print("-------------------------------------------")
 
 output:
 
 .. code-block:: console
 
     $ python arp.py
-    ---------------- ETHERNET_FRAME ----------------
+    -------------- ETHERNET_FRAME -------------
     Dest MAC:         ffffffffffff
     Source MAC:       f0257252f5ca
     Type:             0806
-    ----------------- ARP_HEADER -------------------
+    --------------- ARP_HEADER ----------------
     Hardware type:    0001
     Protocol type:    0800
     Hardware size:    06
@@ -742,4 +2266,4 @@ output:
     Source IP:        140.112.91.254
     Dest MAC:         000000000000
     Dest IP:          140.112.91.20
-    ------------------------------------------------
+    -------------------------------------------

@@ -10,6 +10,7 @@ Welcome to Python cheatsheet!
    :maxdepth: 2
 
    notes/python-basic
+   notes/python-new-py3
    notes/python-unicode
    notes/python-generator
    notes/python-rexp
